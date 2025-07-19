@@ -80,7 +80,7 @@ class FileReportObserver implements TraceObserver {
      */
     @Override
     void onFilePublish(Path destination, Path source) {
-        log.info "File published: ${source} -> ${destination}"
+        log.debug "File published: ${source} -> ${destination}"
         collector.recordFilePublish(destination, source)
     }
 
@@ -111,12 +111,12 @@ class FileReportObserver implements TraceObserver {
         boolean hasPublishedPaths = workDirOutputFiles.any { collector.isFilePublished(it) }
         boolean taskHasPublishDir = hasPublishDir(task)
 
-        log.info "Generating file report for process ${processName} with tag '${tag}': ${jsonFileName}"
-        log.info "  hasPublishedPaths: ${hasPublishedPaths}, taskHasPublishDir: ${taskHasPublishDir}"
-        log.info "  workDirOutputFiles: ${workDirOutputFiles}"
+        log.debug "Generating file report for process ${processName} with tag '${tag}': ${jsonFileName}"
+        log.debug "  hasPublishedPaths: ${hasPublishedPaths}, taskHasPublishDir: ${taskHasPublishDir}"
+        log.debug "  workDirOutputFiles: ${workDirOutputFiles}"
 
         // Always write individual JSON files immediately
-        log.info "Writing individual JSON file for ${task.name}: ${jsonFileName}"
+        log.debug "Writing individual JSON file for ${task.name}: ${jsonFileName}"
         JsonFileWriter.writeToPublishDirs(task, jsonFileName, jsonContent)
         
         // Record this individual JSON file for later update with published files
@@ -139,7 +139,7 @@ class FileReportObserver implements TraceObserver {
     void onFlowComplete() {
         try {
             // Update individual JSON files with published file information
-            log.info "Updating individual JSON files with published file information"
+            log.debug "Updating individual JSON files with published file information"
             collector.updateIndividualJsonFiles()
             
             // Write collated report if enabled

@@ -45,9 +45,6 @@ class FileReportObserver implements TraceObserver {
     private Session session
     private FileReportConfig config
     private FileReportCollector collector
-    
-    // Track pending tasks waiting for file publishing to complete
-    private Map<TaskRun, Map> pendingReports = [:]
 
     @Override
     void onFlowCreate(Session session) {
@@ -83,24 +80,17 @@ class FileReportObserver implements TraceObserver {
      */
     @Override
     void onFilePublish(Path destination, Path source) {
+        log.info "File published: ${source} -> ${destination}"
         collector.recordFilePublish(destination, source)
-        
-        // Check if any pending reports are waiting for this file
-        synchronized(pendingReports) {
-            pendingReports.each { task, reportData ->
-                final workDirOutputFiles = reportData.workDirOutputFiles as List<Path>
-                if( workDirOutputFiles.contains(source) ) {
-                    log.debug "Updating pending report for task ${task.name} with published path: ${destination}"
-                    finalizePendingReport(task, reportData)
-                }
-            }
-        }
     }
 
     /**
      * Generate a JSON report of output files for a completed task.
      */
     private void generateFileReport(TaskRun task, TraceRecord trace) {
+        // Record publishDir paths for later use in collated reports
+        collector.recordTaskPublishDirs(task)
+        
         final jsonContent = collector.createTaskReport(task, trace)
         
         if (!jsonContent) {
@@ -119,21 +109,18 @@ class FileReportObserver implements TraceObserver {
         }
 
         boolean hasPublishedPaths = workDirOutputFiles.any { collector.isFilePublished(it) }
+        boolean taskHasPublishDir = hasPublishDir(task)
 
-        log.debug "Generating file report for process ${processName} with tag '${tag}': ${jsonFileName} (hasPublishedPaths: ${hasPublishedPaths})"
+        log.info "Generating file report for process ${processName} with tag '${tag}': ${jsonFileName}"
+        log.info "  hasPublishedPaths: ${hasPublishedPaths}, taskHasPublishDir: ${taskHasPublishDir}"
+        log.info "  workDirOutputFiles: ${workDirOutputFiles}"
 
-        if (hasPublishedPaths || !hasPublishDir(task)) {
-            // Always write individual files when fileReport is enabled
-            JsonFileWriter.writeToPublishDirs(task, jsonFileName, jsonContent)
-        } else {
-            synchronized(pendingReports) {
-                final pendingReport = new HashMap(jsonContent)
-                pendingReport.jsonFileName = jsonFileName
-                pendingReport.workDirOutputFiles = workDirOutputFiles
-                pendingReports[task] = pendingReport
-            }
-            log.debug "Storing pending report for task ${task.name}, waiting for file publishing"
-        }
+        // Always write individual JSON files immediately
+        log.info "Writing individual JSON file for ${task.name}: ${jsonFileName}"
+        JsonFileWriter.writeToPublishDirs(task, jsonFileName, jsonContent)
+        
+        // Record this individual JSON file for later update with published files
+        collector.recordIndividualJsonFile(task, jsonFileName)
     }
     
     /**
@@ -143,53 +130,18 @@ class FileReportObserver implements TraceObserver {
         final publishers = task.config.getPublishDir()
         return !publishers.isEmpty() && publishers.any { it.enabled }
     }
-    
-    /**
-     * Finalize a pending report when all files have been published.
-     */
-    private void finalizePendingReport(TaskRun task, Map reportData) {
-        final workDirOutputFiles = reportData.workDirOutputFiles as List<Path>
-        boolean allFilesPublished = workDirOutputFiles.every { collector.isFilePublished(it) }
-
-        if (allFilesPublished) {
-            // Update the report with published paths for each emit
-            final outputsMap = (Map)reportData.outputs
-            outputsMap.each { emitName, emitData ->
-                final emitMap = (Map)emitData
-                final workDirFiles = emitMap.workDirFiles as List<String>
-                final publishedFiles = emitMap.publishedFiles as List<String>
-                
-                // Clear and repopulate published files for this emit
-                publishedFiles.clear()
-                workDirFiles.each { workFileStr ->
-                    final workFile = Paths.get(workFileStr)
-                    publishedFiles.addAll(
-                        collector.getPublishedPaths(workFile).collect{ it.toString() }
-                    )
-                }
-            }
-
-            // Always write individual files when fileReport is enabled
-            JsonFileWriter.writeToPublishDirs(task, reportData.jsonFileName as String, reportData)
-            synchronized(pendingReports) {
-                pendingReports.remove(task)
-            }
-            log.debug "Finalized pending report for task ${task.name}"
-        }
-    }
 
     
     /**
-     * Handle any remaining pending reports when the workflow completes.
+     * Handle any remaining tasks when the workflow completes.
      */
     @Override
     void onFlowComplete() {
         try {
-            // Clear any remaining pending reports since we always write individual files now
-            synchronized(pendingReports) {
-                pendingReports.clear()
-            }
-
+            // Update individual JSON files with published file information
+            log.info "Updating individual JSON files with published file information"
+            collector.updateIndividualJsonFiles()
+            
             // Write collated report if enabled
             if (config.collate) {
                 writeCollatedReport()
@@ -210,14 +162,8 @@ class FileReportObserver implements TraceObserver {
             final workDirOutputFile = session.workDir.resolve(config.collatedFileName)
             JsonFileWriter.writeToFile(workDirOutputFile, collatedData)
             
-            // Write to results directory
-            try {
-                final resultsDir = session.baseDir.resolve('results')
-                final resultsFile = resultsDir.resolve(config.collatedFileName)
-                JsonFileWriter.writeToFile(resultsFile, collatedData)
-            } catch (Exception e) {
-                log.debug "Could not write to results directory", e
-            }
+            // Write to publishDir locations
+            writeCollatedToPublishDirs(collatedData)
             
             final taskCount = ((List)collatedData.tasks).size()
             log.info "Collated file report written with ${taskCount} tasks to: ${workDirOutputFile}"
@@ -227,42 +173,50 @@ class FileReportObserver implements TraceObserver {
     }
     
     /**
-     * Write collated report to all available publishDir locations from tasks.
+     * Write collated report to root publishDir folders (parent directories of process-specific publishDirs).
      */
     private void writeCollatedToPublishDirs(Map collatedData) {
         final taskList = (List) collatedData.tasks
-        final publishDirs = [] as Set
+        final processPublishDirs = [] as Set
         
-        // Collect all unique publishDir paths from tasks
-        synchronized(pendingReports) {
-            pendingReports.keySet().each { task ->
-                task.config.getPublishDir().each { publisher ->
-                    if (publisher.enabled) {
-                        publishDirs << publisher.path
-                    }
-                }
-            }
-        }
+        // Get publishDirs from collector's recorded paths
+        processPublishDirs.addAll(collector.getPublishDirPaths())
         
-        // If no pending reports, try to get publishDirs from session config
-        if (publishDirs.isEmpty()) {
-            try {
-                final basePublishDir = session.baseDir.resolve('results')
-                publishDirs << basePublishDir
-            } catch (Exception e) {
-                log.debug "Could not determine publishDir locations for collated report"
-            }
-        }
-        
-        // Write to each publishDir
-        publishDirs.each { publishPath ->
+        // Extract root publishDir folders (parent directories)
+        final rootPublishDirs = [] as Set
+        processPublishDirs.each { publishPath ->
             try {
                 final publishPathObj = publishPath instanceof Path ? publishPath : Paths.get(publishPath.toString())
-                final collatedFile = publishPathObj.resolve(config.collatedFileName)
-                JsonFileWriter.writeToFile(collatedFile, collatedData)
-                log.debug "Written collated report to: ${collatedFile}"
+                final parentDir = publishPathObj.parent
+                if (parentDir != null) {
+                    rootPublishDirs << parentDir
+                } else {
+                    // If no parent, use the path itself (already a root dir)
+                    rootPublishDirs << publishPathObj
+                }
             } catch (Exception e) {
-                log.debug "Failed to write collated report to ${publishPath}", e
+                log.debug "Failed to extract parent directory from ${publishPath}", e
+                // Fallback to using the original path
+                final publishPathObj = publishPath instanceof Path ? publishPath : Paths.get(publishPath.toString())
+                rootPublishDirs << publishPathObj
+            }
+        }
+        
+        // If still no publish directories found, log the situation
+        if (rootPublishDirs.isEmpty()) {
+            log.debug "No root publishDir locations found for collated report"
+            return
+        }
+        
+        // Write to each root publishDir
+        rootPublishDirs.each { rootPath ->
+            try {
+                final Path rootPathObj = rootPath instanceof Path ? rootPath : Paths.get(rootPath.toString())
+                final collatedFile = rootPathObj.resolve(config.collatedFileName)
+                JsonFileWriter.writeToFile(collatedFile, collatedData)
+                log.debug "Written collated report to root publishDir: ${collatedFile}"
+            } catch (Exception e) {
+                log.debug "Failed to write collated report to root publishDir ${rootPath}", e
             }
         }
     }

@@ -40,17 +40,57 @@ class FileReportCollector {
     // Store all task reports for collation
     private final List<Map> allTaskReports = [].asSynchronized()
     
+    // Track unique publishDir paths encountered
+    private final Set<Path> allPublishDirs = ([] as Set<Path>).asSynchronized()
+    
+    // Track individual JSON files that need to be updated with published files
+    private final Map<TaskRun, String> taskJsonFiles = [:].asSynchronized()
+    
     /**
      * Record a file publishing event.
      */
     void recordFilePublish(Path destination, Path source) {
-        log.debug "File published: ${source} -> ${destination}"
+        log.info "FileReportCollector: Recording file publish: ${source} -> ${destination}"
         
         synchronized(publishedPathMap) {
             if (!publishedPathMap.containsKey(source)) {
                 publishedPathMap[source] = [] as Set
             }
             publishedPathMap[source] << destination
+            log.info "FileReportCollector: publishedPathMap now contains ${publishedPathMap.size()} source files"
+            log.info "FileReportCollector: Source ${source} maps to ${publishedPathMap[source]}"
+        }
+    }
+    
+    /**
+     * Record publishDir paths from a task for later use.
+     */
+    void recordTaskPublishDirs(TaskRun task) {
+        synchronized(allPublishDirs) {
+            task.config.getPublishDir().each { publisher ->
+                if (publisher.enabled) {
+                    allPublishDirs << publisher.path
+                }
+            }
+        }
+    }
+    
+    /**
+     * Get all recorded publishDir paths.
+     */
+    Set<Path> getPublishDirPaths() {
+        synchronized(allPublishDirs) {
+            return new HashSet(allPublishDirs)
+        }
+    }
+    
+    /**
+     * Record that an individual JSON file was written for a task.
+     */
+    void recordIndividualJsonFile(TaskRun task, String jsonFileName) {
+        synchronized(taskJsonFiles) {
+            taskJsonFiles[task] = jsonFileName
+            log.info "FileReportCollector: Recorded individual JSON file for ${task.name}: ${jsonFileName}"
         }
     }
     
@@ -100,6 +140,10 @@ class FileReportCollector {
     Map createCollatedReport() {
         synchronized(allTaskReports) {
             final taskList = new ArrayList(allTaskReports)
+            
+            // Update published files for all tasks at collation time
+            updatePublishedFilesInReports(taskList)
+            
             return [
                 workflow: [
                     totalTasks: taskList.size(),
@@ -107,6 +151,81 @@ class FileReportCollector {
                 ],
                 tasks: taskList
             ]
+        }
+    }
+    
+    /**
+     * Update published files information in task reports.
+     */
+    private void updatePublishedFilesInReports(List<Map> taskReports) {
+        synchronized(publishedPathMap) {
+            log.info "FileReportCollector: Updating published files in ${taskReports.size()} task reports"
+            log.info "FileReportCollector: publishedPathMap contains ${publishedPathMap.size()} mappings"
+            publishedPathMap.each { source, destinations ->
+                log.info "FileReportCollector: ${source} -> ${destinations}"
+            }
+            
+            taskReports.each { taskReport ->
+                final taskName = taskReport.taskName
+                log.info "FileReportCollector: Processing task ${taskName}"
+                final outputsMap = (Map)taskReport.outputs
+                outputsMap.each { emitName, emitData ->
+                    final emitMap = (Map)emitData
+                    final workDirFiles = emitMap.workDirFiles as List<String>
+                    final publishedFiles = emitMap.publishedFiles as List<String>
+                    
+                    log.info "FileReportCollector: Emit ${emitName} has workDirFiles: ${workDirFiles}"
+                    
+                    // Clear and repopulate published files for this emit
+                    publishedFiles.clear()
+                    workDirFiles.each { workFileStr ->
+                        final workFile = Paths.get(workFileStr)
+                        if (publishedPathMap.containsKey(workFile)) {
+                            final destinations = publishedPathMap[workFile].collect{ it.toString() }
+                            publishedFiles.addAll(destinations)
+                            log.info "FileReportCollector: Found published files for ${workFile}: ${destinations}"
+                        } else {
+                            log.info "FileReportCollector: No published files found for ${workFile}"
+                        }
+                    }
+                    
+                    log.info "FileReportCollector: Final publishedFiles for emit ${emitName}: ${publishedFiles}"
+                }
+            }
+        }
+    }
+    
+    /**
+     * Update all individual JSON files with published file information.
+     */
+    void updateIndividualJsonFiles() {
+        synchronized(taskJsonFiles) {
+            log.info "FileReportCollector: Updating ${taskJsonFiles.size()} individual JSON files with published files"
+            taskJsonFiles.each { task, jsonFileName ->
+                try {
+                    // Find the task report for this task
+                    Map taskReport = null
+                    synchronized(allTaskReports) {
+                        taskReport = allTaskReports.find { report ->
+                            report.taskName == task.name || 
+                            (report.process == task.processor.name && report.workDir == task.workDir.toString())
+                        }
+                    }
+                    
+                    if (taskReport) {
+                        // Update published files in this report
+                        updatePublishedFilesInReports([taskReport])
+                        
+                        // Rewrite the individual JSON file with updated data
+                        log.info "FileReportCollector: Rewriting individual JSON file for ${task.name}: ${jsonFileName}"
+                        JsonFileWriter.writeToPublishDirs(task, jsonFileName, taskReport)
+                    } else {
+                        log.warn "FileReportCollector: Could not find task report for ${task.name}"
+                    }
+                } catch (Exception e) {
+                    log.warn "FileReportCollector: Failed to update individual JSON file for ${task.name}", e
+                }
+            }
         }
     }
     

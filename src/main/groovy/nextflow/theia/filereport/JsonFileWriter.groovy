@@ -83,15 +83,15 @@ class JsonFileWriter {
             if (CloudFileUtils.isS3Path(filePath)) {
                 // Handle S3 paths
                 S3FileWriter.writeToS3(filePath.toString(), jsonText)
-                log.info "Written collated file report to S3: ${filePath}"
+                log.debug "Written file report to S3: ${filePath}"
             } else {
                 // Handle local filesystem paths
                 Files.createDirectories(filePath.parent)
                 Files.write(filePath, jsonText.getBytes('UTF-8'))
-                log.info "Written collated file report to: ${filePath}"
+                log.debug "Written file report to: ${filePath}"
             }
         } catch (Exception e) {
-            log.warn "Failed to write collated file report to ${filePath}", e
+            log.warn "Failed to write file report to ${filePath}", e
         }
     }
 }

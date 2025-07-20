@@ -35,7 +35,8 @@ import nextflow.trace.TraceRecord
 class FileReportCollector {
     
     // Track mapping from source (work dir) paths to published destination paths
-    private final Map<Path, Set<Path>> publishedPathMap = [:].asSynchronized()
+    // Use normalized path strings as keys to avoid Path object comparison issues
+    private final Map<String, Set<String>> publishedPathMap = [:].asSynchronized()
     
     // Store all task reports for collation
     private final List<Map> allTaskReports = [].asSynchronized()
@@ -52,13 +53,17 @@ class FileReportCollector {
     void recordFilePublish(Path destination, Path source) {
         log.debug "FileReportCollector: Recording file publish: ${source} -> ${destination}"
         
+        // Normalize paths to strings to avoid Path object comparison issues
+        final sourceKey = source.toString()
+        final destinationStr = destination.toString()
+        
         synchronized(publishedPathMap) {
-            if (!publishedPathMap.containsKey(source)) {
-                publishedPathMap[source] = [] as Set
+            if (!publishedPathMap.containsKey(sourceKey)) {
+                publishedPathMap[sourceKey] = [] as Set
             }
-            publishedPathMap[source] << destination
+            publishedPathMap[sourceKey] << destinationStr
             log.debug "FileReportCollector: publishedPathMap now contains ${publishedPathMap.size()} source files"
-            log.debug "FileReportCollector: Source ${source} maps to ${publishedPathMap[source]}"
+            log.debug "FileReportCollector: Source ${sourceKey} maps to ${publishedPathMap[sourceKey]}"
         }
     }
     
@@ -179,13 +184,12 @@ class FileReportCollector {
                     // Clear and repopulate published files for this emit
                     publishedFiles.clear()
                     workDirFiles.each { workFileStr ->
-                        final workFile = Paths.get(workFileStr)
-                        if (publishedPathMap.containsKey(workFile)) {
-                            final destinations = publishedPathMap[workFile].collect{ it.toString() }
+                        if (publishedPathMap.containsKey(workFileStr)) {
+                            final destinations = publishedPathMap[workFileStr]
                             publishedFiles.addAll(destinations)
-                            log.debug "FileReportCollector: Found published files for ${workFile}: ${destinations}"
+                            log.debug "FileReportCollector: Found published files for ${workFileStr}: ${destinations}"
                         } else {
-                            log.debug "FileReportCollector: No published files found for ${workFile}"
+                            log.debug "FileReportCollector: No published files found for ${workFileStr}"
                         }
                     }
                     
@@ -234,16 +238,16 @@ class FileReportCollector {
      */
     boolean isFilePublished(Path sourcePath) {
         synchronized(publishedPathMap) {
-            return publishedPathMap.containsKey(sourcePath)
+            return publishedPathMap.containsKey(sourcePath.toString())
         }
     }
     
     /**
      * Get published paths for a source file.
      */
-    Set<Path> getPublishedPaths(Path sourcePath) {
+    Set<String> getPublishedPaths(Path sourcePath) {
         synchronized(publishedPathMap) {
-            return publishedPathMap.get(sourcePath, [] as Set)
+            return publishedPathMap.get(sourcePath.toString(), [] as Set)
         }
     }
     
@@ -325,11 +329,10 @@ class FileReportCollector {
                 final publishedPaths = []
                 
                 for (Path workFile : workDirFiles) {
-                    workDirPaths << workFile.toString()
-                    if (publishedPathMap.containsKey(workFile)) {
-                        publishedPaths.addAll(
-                            publishedPathMap[workFile].collect{ it.toString() }
-                        )
+                    final workFileStr = workFile.toString()
+                    workDirPaths << workFileStr
+                    if (publishedPathMap.containsKey(workFileStr)) {
+                        publishedPaths.addAll(publishedPathMap[workFileStr])
                     }
                 }
                 
@@ -347,10 +350,11 @@ class FileReportCollector {
     private void populateFilePaths(Map jsonContent, List<Path> workDirOutputFiles) {
         synchronized(publishedPathMap) {
             for (Path workFile : workDirOutputFiles) {
-                ((List<String>)((Map)jsonContent.outputs).workDirFiles).add(workFile.toString())
-                if (publishedPathMap.containsKey(workFile)) {
+                final workFileStr = workFile.toString()
+                ((List<String>)((Map)jsonContent.outputs).workDirFiles).add(workFileStr)
+                if (publishedPathMap.containsKey(workFileStr)) {
                     ((List<String>)((Map)jsonContent.outputs).publishedFiles).addAll(
-                        publishedPathMap[workFile].collect{ it.toString() }
+                        publishedPathMap[workFileStr]
                     )
                 }
             }

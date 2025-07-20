@@ -27,6 +27,7 @@ import nextflow.processor.TaskRun
 import nextflow.script.params.FileOutParam
 import nextflow.trace.TraceObserver
 import nextflow.trace.TraceRecord
+import nextflow.theia.filereport.CloudFileUtils
 
 /**
  * Reports process output file paths to JSON files.
@@ -158,22 +159,19 @@ class FileReportObserver implements TraceObserver {
         try {
             final collatedData = collector.createCollatedReport()
             
-            // Write to work directory
-            final workDirOutputFile = session.workDir.resolve(config.collatedFileName)
-            JsonFileWriter.writeToFile(workDirOutputFile, collatedData)
-            
-            // Write to publishDir locations
+            // Write to publishDir locations only
             writeCollatedToPublishDirs(collatedData)
             
             final taskCount = ((List)collatedData.tasks).size()
-            log.info "Collated file report written with ${taskCount} tasks to: ${workDirOutputFile}"
+            log.info "Collated file report written with ${taskCount} tasks"
         } catch (Exception e) {
             log.warn "Failed to write collated file report", e
         }
     }
     
     /**
-     * Write collated report to root publishDir folders (parent directories of process-specific publishDirs).
+     * Write collated report to publishDir folders.
+     * Writes to the publishDir itself for both S3 and local paths.
      */
     private void writeCollatedToPublishDirs(Map collatedData) {
         final taskList = (List) collatedData.tasks
@@ -182,41 +180,24 @@ class FileReportObserver implements TraceObserver {
         // Get publishDirs from collector's recorded paths
         processPublishDirs.addAll(collector.getPublishDirPaths())
         
-        // Extract root publishDir folders (parent directories)
-        final rootPublishDirs = [] as Set
-        processPublishDirs.each { publishPath ->
-            try {
-                final publishPathObj = publishPath instanceof Path ? publishPath : Paths.get(publishPath.toString())
-                final parentDir = publishPathObj.parent
-                if (parentDir != null) {
-                    rootPublishDirs << parentDir
-                } else {
-                    // If no parent, use the path itself (already a root dir)
-                    rootPublishDirs << publishPathObj
-                }
-            } catch (Exception e) {
-                log.debug "Failed to extract parent directory from ${publishPath}", e
-                // Fallback to using the original path
-                final publishPathObj = publishPath instanceof Path ? publishPath : Paths.get(publishPath.toString())
-                rootPublishDirs << publishPathObj
-            }
-        }
+        // Write to the publishDir itself (not parent directory)
+        final targetPublishDirs = processPublishDirs
         
-        // If still no publish directories found, log the situation
-        if (rootPublishDirs.isEmpty()) {
-            log.debug "No root publishDir locations found for collated report"
+        // If no publish directories found, log the situation
+        if (targetPublishDirs.isEmpty()) {
+            log.debug "No publishDir locations found for collated report"
             return
         }
         
-        // Write to each root publishDir
-        rootPublishDirs.each { rootPath ->
+        // Write to each publishDir
+        targetPublishDirs.each { publishPath ->
             try {
-                final Path rootPathObj = rootPath instanceof Path ? rootPath : Paths.get(rootPath.toString())
-                final collatedFile = rootPathObj.resolve(config.collatedFileName)
+                final Path publishPathObj = publishPath instanceof Path ? publishPath : Paths.get(publishPath.toString())
+                final collatedFile = publishPathObj.resolve(config.collatedFileName)
                 JsonFileWriter.writeToFile(collatedFile, collatedData)
-                log.debug "Written collated report to root publishDir: ${collatedFile}"
+                log.info "Written collated report to: ${collatedFile}"
             } catch (Exception e) {
-                log.debug "Failed to write collated report to root publishDir ${rootPath}", e
+                log.debug "Failed to write collated report to publishDir ${publishPath}", e
             }
         }
     }

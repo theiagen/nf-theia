@@ -49,7 +49,7 @@ theia {
     fileReport {
         enabled = true
         collate = true
-        collatedFileName = "colalted-workflow-files.json"
+        collatedFileName = "collated-workflow-files.json"
     }
 }
 ```

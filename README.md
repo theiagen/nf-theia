@@ -17,30 +17,6 @@ A Nextflow plugin for comprehensive file tracking and reporting, providing detai
   - **Latch Data**: `latch://workspace.account/path`
   - **Local filesystem**: `/local/path`
 
-## Quick Start
-
-1. **Clone and build**:
-   ```bash
-   git clone https://github.com/theiagen/nf-theia.git
-   cd nf-theia
-   ./gradlew build
-   ```
-
-2. **Add to your workflow**:
-   ```groovy
-   // In your nextflow.config
-   plugins {
-       id 'nf-theia@0.2.0'
-   }
-   
-   theia {
-       fileReport.enabled = true
-       fileReport.collate = true
-   }
-   ```
-
-3. **Run your workflow** - reports will be generated automatically in your publishDir locations!
-
 ## Installation
 
 ### Local Installation (Development)

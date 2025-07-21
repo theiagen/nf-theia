@@ -51,9 +51,9 @@ A Nextflow plugin for comprehensive file tracking and reporting, providing detai
 ### Distribution Installation
 
 1. **Test repository** (alternative for development):
+
    ```bash
    export NXF_PLUGINS_TEST_REPOSITORY="https://github.com/theiagen/nf-theia/releases/download/v0.2.0/nf-theia-0.2.0-meta.json"
-   nextflow run your_workflow.nf
    ```
 
 2. **Manual plugin installation**:

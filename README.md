@@ -110,84 +110,14 @@ theia {
 - **`collate`** (boolean): Generate a single collated report file (default: `false`)
 - **`collatedFileName`** (string): Name of the collated report file (default: `"colalted-workflow-files.json"`)
 
-### Cloud Storage Configuration
+**Note**: Ensure your environment has proper authentication configured for your chosen cloud storage provider.
 
-The plugin automatically detects and handles different storage backends based on the publishDir paths in your workflow:
-
-#### Amazon S3
-```groovy
-process EXAMPLE {
-    publishDir 's3://my-bucket/results', mode: 'copy'
-    // ... process definition
-}
-```
-
-#### Google Cloud Storage
-```groovy
-process EXAMPLE {
-    publishDir 'gs://my-bucket/results', mode: 'copy'
-    // ... process definition
-}
-```
-
-#### Azure Blob Storage
-```groovy
-process EXAMPLE {
-    publishDir 'azure://container/results', mode: 'copy'
-    // ... process definition
-}
-```
-
-#### Latch Data
-```groovy
-process EXAMPLE {
-    publishDir 'latch://workspace.account/results', mode: 'copy'
-    // ... process definition
-}
-```
-
-**Note**: Ensure your environment has proper authentication configured for your chosen cloud storage provider (AWS credentials, Google Cloud SDK, Azure CLI, or Latch SDK).
-
-## Architecture
-
-### File System Integration
-
-The plugin leverages Nextflow's custom file system provider architecture to support multiple storage backends seamlessly:
-
-```
-User Workflow
-     ↓
-publishDir: "latch://workspace.account/results"
-     ↓
-nf-theia Plugin
-     ↓
-CloudFileUtils.isLatchPath() → true
-     ↓
-LatchFileWriter.writeToLatch()
-     ↓
-java.nio.file.Files.write()
-     ↓
-LatchFileSystemProvider (from latch/ folder)
-     ↓
-Latch Data Platform
-```
-
-### Key Components
-
-1. **CloudFileUtils**: Detects storage backend from URL schemes
-2. **FileWriter Classes**: Route operations to appropriate cloud providers  
-3. **FileReportCollector**: Aggregates file information across tasks
-4. **FileReportObserver**: Monitors workflow execution events
-5. **Custom File Systems**: Handle cloud-specific operations transparently
-
-This architecture allows the plugin to treat all storage backends uniformly while leveraging Nextflow's built-in cloud storage capabilities.
-
-2. **Run your workflow** as normal:
+**Run your workflow** as normal:
    ```bash
    nextflow run your_workflow.nf
    ```
 
-3. **Check the generated reports**:
+**Check the generated reports**:
    - Individual JSON reports are generated for each process/tag in their respective publishDir locations
    - If `collate = true`, a single consolidated JSON file will be created in the root publishDir location with all file information
 
@@ -276,28 +206,6 @@ If no reports are generated:
 3. Ensure you have write permissions to the output directory
 4. Check the Nextflow log for plugin loading messages
 
-### Cloud Storage Issues
-
-#### Amazon S3
-- Verify AWS credentials: `aws configure list`
-- Check bucket permissions and region settings
-- Ensure S3 paths use correct format: `s3://bucket/path`
-
-#### Google Cloud Storage
-- Authenticate: `gcloud auth application-default login`
-- Verify project and bucket access permissions
-- Ensure GS paths use correct format: `gs://bucket/path`
-
-#### Azure Blob Storage
-- Login: `az login`
-- Check storage account and container permissions
-- Ensure Azure paths use correct format: `azure://container/path`
-
-#### Latch Data
-- Verify Latch authentication: Check `~/.latch/token` exists
-- For Latch runtime: `FLYTE_INTERNAL_EXECUTION_ID` should be set
-- Ensure Latch paths use correct format: `latch://workspace.account/path`
-
 ### Plugin Build Issues
 
 If you encounter build issues:
@@ -327,24 +235,10 @@ If you encounter build issues:
 - 🚧 **Plugin registry**: Not yet published to official registry
 - 🚧 **Test coverage**: Basic integration tests available
 
-## Contributing
-
-We welcome contributions! Please see [CONTRIBUTING.md](CONTRIBUTING.md) for:
-- Development setup and build instructions
-- Architecture documentation for custom file systems
-- Testing guidelines and procedures
-- Code style and submission guidelines
-
 ## Support
 
 - **Issues**: Report bugs and request features via [GitHub Issues](https://github.com/theiagen/nf-theia/issues)
-- **Discussions**: Ask questions in [GitHub Discussions](https://github.com/theiagen/nf-theia/discussions)
-- **Documentation**: See [CONTRIBUTING.md](CONTRIBUTING.md) for detailed development docs
 
 ## License
 
 Licensed under the Apache License, Version 2.0. See [LICENSE](LICENSE) file for details.
-
----
-
-**nf-theia** - Comprehensive file tracking for Nextflow workflows across any storage backend.

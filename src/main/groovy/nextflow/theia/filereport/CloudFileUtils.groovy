@@ -52,10 +52,17 @@ class CloudFileUtils {
     }
 
     /**
+     * Check if a path is a Latch path.
+     */
+    static boolean isLatchPath(Path path) {
+        return path.toString().startsWith('latch://')
+    }
+
+    /**
      * Check if a path is any cloud storage path.
      */
     static boolean isCloudPath(Path path) {
-        return isS3Path(path) || isGcsPath(path) || isAzurePath(path)
+        return isS3Path(path) || isGcsPath(path) || isAzurePath(path) || isLatchPath(path)
     }
 
     /**

@@ -61,6 +61,11 @@ class JsonFileWriter {
                     final s3JsonPath = publishPath.toString() + "/" + jsonFileName
                     S3FileWriter.writeToS3(s3JsonPath, jsonText)
                     log.debug "Written file report to S3: ${s3JsonPath}"
+                } else if (CloudFileUtils.isLatchPath(publishPath)) {
+                    // Handle Latch paths
+                    final latchJsonPath = publishPath.toString() + "/" + jsonFileName
+                    LatchFileWriter.writeToLatch(latchJsonPath, jsonText)
+                    log.debug "Written file report to Latch: ${latchJsonPath}"
                 } else {
                     // Handle local filesystem paths
                     Files.createDirectories(publishPath)
@@ -84,6 +89,10 @@ class JsonFileWriter {
                 // Handle S3 paths
                 S3FileWriter.writeToS3(filePath.toString(), jsonText)
                 log.debug "Written file report to S3: ${filePath}"
+            } else if (CloudFileUtils.isLatchPath(filePath)) {
+                // Handle Latch paths
+                LatchFileWriter.writeToLatch(filePath.toString(), jsonText)
+                log.debug "Written file report to Latch: ${filePath}"
             } else {
                 // Handle local filesystem paths
                 Files.createDirectories(filePath.parent)

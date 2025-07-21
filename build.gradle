@@ -15,28 +15,177 @@
  */
 
 plugins {
-    id 'io.nextflow.nextflow-plugin' version '0.0.1-alpha2'
+    id "java"
+    id "groovy"
+    id "io.nextflow.nf-build-plugin" version "1.0.1"
 }
 
-version = '0.1.0'
-
-nextflowPlugin {
-    nextflowVersion = '24.10.0'
-    
-    provider = 'theiagen'
-    className = 'nextflow.theia.TheiaPlugin'
-    extensionPoints = [
-        'nextflow.theia.TheiaObserverFactory'
-    ]
-    
-    publishing {
-        github {
-            repository = 'theiagen/nf-theia'
-            userName = project.findProperty('github_username')
-            authToken = project.findProperty('github_access_token')
-            email = project.findProperty('github_commit_email')
-            
-            indexUrl = 'https://github.com/nextflow-io/plugins/blob/main/plugins.json'
-        }
+// Set Java compatibility
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(17)
     }
 }
+
+ext.github_organization = 'theiagen'
+ext.github_username = project.findProperty('github_username') ?: System.getenv('GITHUB_USERNAME')
+ext.github_access_token = project.findProperty('github_access_token') ?: System.getenv('GITHUB_TOKEN')
+ext.github_commit_email = project.findProperty('github_commit_email') ?: System.getenv('GITHUB_EMAIL')
+
+repositories {
+    mavenLocal()
+    mavenCentral()
+}
+
+dependencies {
+    // Groovy and Nextflow dependencies (compatible with Java 11)
+    compileOnly 'org.apache.groovy:groovy:4.0.6'
+    compileOnly 'io.nextflow:nextflow:24.10.0'
+    
+    // Test dependencies
+    testImplementation 'org.apache.groovy:groovy:4.0.6'
+    testImplementation 'io.nextflow:nextflow:24.10.0'
+    testImplementation platform('org.junit:junit-bom:5.9.3')
+    testImplementation 'org.junit.jupiter:junit-jupiter'
+    testImplementation 'org.spockframework:spock-core:2.3-groovy-4.0'
+}
+
+String computeSha512(File file) {
+    if( !file.exists() )
+        throw new GradleException("Missing file: $file -- cannot compute SHA-512")
+    return org.apache.commons.codec.digest.DigestUtils.sha512Hex(file.bytes)
+}
+
+String now() {
+    "${java.time.OffsetDateTime.now().format(java.time.format.DateTimeFormatter.ISO_DATE_TIME)}"
+}
+
+String metaFromManifest(String meta, File file) {
+    def str = file.text
+    def regex = ~/(?m)^$meta:\s*([\w-\.<>=\s]+)$/
+    def m = regex.matcher(str)
+    if( m.find() ) {
+        def ver = m.group(1).trim()
+        return ver
+    }
+    throw new GradleException("Cannot find '$meta' for plugin: $file")
+}
+
+// Read version from MANIFEST.MF
+version = metaFromManifest('Plugin-Version', file('src/main/resources/META-INF/MANIFEST.MF'))
+
+def timestamp = now()
+
+tasks.withType(Jar) {
+    duplicatesStrategy = DuplicatesStrategy.INCLUDE
+}
+
+/*
+ * Creates plugin zip and json meta file in plugin `build/libs` directory
+ */
+task makeZip(type: Jar) {
+    into('classes') { with jar }
+    into('lib') { from configurations.runtimeClasspath }
+    manifest.from file('src/main/resources/META-INF/MANIFEST.MF')
+    archiveExtension = 'zip'
+    preserveFileTimestamps = false
+    reproducibleFileOrder = true
+
+    doLast {
+        // create the meta file
+        final zip = new File("$buildDir/libs/${project.name}-${project.version}.zip")
+        final json = new File("$buildDir/libs/${project.name}-${project.version}-meta.json")
+        json.text = """\
+          {
+            "version": "${project.version}",
+            "date": "${timestamp}",
+            "url": "https://github.com/${github_organization}/${project.name}/releases/download/${project.version}/${project.name}-${project.version}.zip",
+            "requires": "${metaFromManifest('Plugin-Requires',file('src/main/resources/META-INF/MANIFEST.MF'))}",
+            "sha512sum": "${computeSha512(zip)}"
+          }
+        """.stripIndent()
+        // cleanup tmp dir
+        file("$buildDir/tmp/makeZip").deleteDir()
+    }
+    outputs.file("$buildDir/libs/${project.name}-${project.version}.zip")
+}
+
+/*
+ * Copy the plugin dependencies in the project `build/target/libs` directory
+ */
+task copyPluginLibs(type: Sync) {
+    from configurations.runtimeClasspath
+    into 'build/target/libs'
+}
+
+/*
+ * Copy the plugin in the project root build/plugins directory
+ */
+task copyPluginZip(type: Copy, dependsOn: makeZip) {
+    from makeZip
+    into "$buildDir/plugins"
+    outputs.file("$buildDir/plugins/${project.name}-${project.version}.zip")
+    doLast {
+        ant.unzip(
+                src: "$buildDir/plugins/${project.name}-${project.version}.zip",
+                dest: "$buildDir/plugins/${project.name}-${project.version}"
+        )
+    }
+}
+
+task uploadPlugin(type: io.nextflow.gradle.tasks.GithubUploader, dependsOn: makeZip) {
+    assets = providers.provider {["$buildDir/libs/${project.name}-${project.version}.zip",
+                                  "$buildDir/libs/${project.name}-${project.version}-meta.json" ]}
+    release = providers.provider { project.version }
+    repo = providers.provider { project.name }
+    owner = github_organization
+    userName = github_username
+    authToken = github_access_token
+    skipExisting = true
+}
+
+jar {
+    from sourceSets.main.allSource
+    doLast {
+        file("$buildDir/tmp/jar").deleteDir()
+    }
+}
+
+tasks.withType(GenerateModuleMetadata) {
+    enabled = false
+}
+
+task upload(dependsOn: [uploadPlugin] ) { }
+
+/*
+ * Install plugin locally to Nextflow's plugin directory for testing
+ */
+task installPlugin(dependsOn: makeZip) {
+    doLast {
+        def pluginDir = file("${System.getProperty('user.home')}/.nextflow/plugins/${project.name}-${project.version}")
+        def pluginZip = file("$buildDir/libs/${project.name}-${project.version}.zip")
+        
+        // Remove existing plugin directory if it exists
+        if (pluginDir.exists()) {
+            pluginDir.deleteDir()
+        }
+        
+        // Create plugin directory
+        pluginDir.mkdirs()
+        
+        // Extract ZIP to plugin directory
+        ant.unzip(src: pluginZip, dest: pluginDir)
+        
+        println "Plugin installed locally to: ${pluginDir}"
+        println "You can now use the plugin in your workflows with:"
+        println "plugins { id 'nf-theia@${project.version}' }"
+    }
+}
+
+// Install the plugin locally for development/testing
+assemble.dependsOn copyPluginZip
+
+/*
+ * Copies the plugins required dependencies in the corresponding lib directory
+ */
+classes.dependsOn copyPluginLibs

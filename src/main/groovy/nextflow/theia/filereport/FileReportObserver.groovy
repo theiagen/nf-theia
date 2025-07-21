@@ -171,34 +171,105 @@ class FileReportObserver implements TraceObserver {
     
     /**
      * Write collated report to publishDir folders.
-     * Writes to the publishDir itself for both S3 and local paths.
+     * Writes to the common base publishDir only, not to individual sample subdirectories.
      */
     private void writeCollatedToPublishDirs(Map collatedData) {
         final taskList = (List) collatedData.tasks
-        final processPublishDirs = [] as Set
         
-        // Get publishDirs from collector's recorded paths
-        processPublishDirs.addAll(collector.getPublishDirPaths())
-        
-        // Write to the publishDir itself (not parent directory)
-        final targetPublishDirs = processPublishDirs
+        // Get all publishDir paths and find their common base directories
+        final allPublishDirs = [] as Set<String>
+        collector.getPublishDirPaths().each { publishPath ->
+            allPublishDirs.add(publishPath.toString())
+        }
         
         // If no publish directories found, log the situation
-        if (targetPublishDirs.isEmpty()) {
+        if (allPublishDirs.isEmpty()) {
             log.debug "No publishDir locations found for collated report"
             return
         }
         
-        // Write to each publishDir
-        targetPublishDirs.each { publishPath ->
+        // Find common base directories to avoid writing to every subdirectory
+        final basePublishDirs = findBasePublishDirs(allPublishDirs)
+        
+        // Write to each base publishDir
+        basePublishDirs.each { publishPathStr ->
             try {
-                final Path publishPathObj = publishPath instanceof Path ? publishPath : Paths.get(publishPath.toString())
+                final Path publishPathObj = Paths.get(publishPathStr)
                 final collatedFile = publishPathObj.resolve(config.collatedFileName)
                 JsonFileWriter.writeToFile(collatedFile, collatedData)
                 log.info "Written collated report to: ${collatedFile}"
             } catch (Exception e) {
-                log.debug "Failed to write collated report to publishDir ${publishPath}", e
+                log.debug "Failed to write collated report to publishDir ${publishPathStr}", e
             }
         }
+    }
+    
+    /**
+     * Find common base directories from all publishDir paths to avoid duplicating
+     * collated files in every subdirectory.
+     */
+    private Set<String> findBasePublishDirs(Set<String> allPublishDirs) {
+        if (allPublishDirs.size() <= 1) {
+            return allPublishDirs
+        }
+        
+        final basePublishDirs = [] as Set<String>
+        final pathList = new ArrayList(allPublishDirs)
+        
+        // Find the longest common prefix among all paths
+        String commonPrefix = findLongestCommonPrefix(pathList)
+        
+        if (commonPrefix && !commonPrefix.equals("/") && !commonPrefix.equals("")) {
+            // Make sure the common prefix ends at a directory boundary
+            final lastSlash = commonPrefix.lastIndexOf('/')
+            if (lastSlash > 0) {
+                commonPrefix = commonPrefix.substring(0, lastSlash)
+            }
+            
+            // Verify this is a meaningful base directory (not just filesystem root)
+            if (commonPrefix.length() > 1 && !commonPrefix.equals("/Users")) {
+                basePublishDirs.add(commonPrefix)
+                log.debug "Found common base publishDir: ${commonPrefix}"
+                return basePublishDirs
+            }
+        }
+        
+        // If no meaningful common prefix found, fall back to all unique paths
+        log.debug "No meaningful common base found, using all publishDirs: ${allPublishDirs}"
+        return allPublishDirs
+    }
+    
+    /**
+     * Find the longest common prefix among a list of paths.
+     */
+    private String findLongestCommonPrefix(List<String> paths) {
+        if (paths.isEmpty()) {
+            return ""
+        }
+        
+        if (paths.size() == 1) {
+            // For a single path, return its parent directory
+            final path = Paths.get(paths[0])
+            return path.parent?.toString() ?: paths[0]
+        }
+        
+        // Sort paths to make comparison easier
+        paths.sort()
+        
+        final first = paths[0]
+        final last = paths[paths.size() - 1]
+        
+        final minLength = Math.min(first.length(), last.length())
+        int commonLength = 0
+        
+        for (int i = 0; i < minLength; i++) {
+            if (first.charAt(i) == last.charAt(i)) {
+                commonLength++
+            } else {
+                break
+            }
+        }
+        
+        return first.substring(0, commonLength)
     }
 }

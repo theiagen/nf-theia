@@ -8,13 +8,14 @@ process ANALYZE_SAMPLE {
     val sample_id
     
     output:
-    path "${sample_id}_analysis.txt", emit: analysis
+    path "*_analysis.txt", emit: analysis
     path "${sample_id}_summary.txt", emit: summary
     path "${sample_id}_report.pdf", emit: report
 
     script:
     """
-    echo "Analysis results for sample ${sample_id}" > ${sample_id}_analysis.txt
+    echo "Analysis results for sample ${sample_id}" > ${sample_id}_a_analysis.txt
+    echo "Analysis results for sample ${sample_id}" > ${sample_id}_b_analysis.txt
     echo "Summary for ${sample_id}: processed successfully" > ${sample_id}_summary.txt
     echo "PDF report placeholder for ${sample_id}" > ${sample_id}_report.pdf
     """

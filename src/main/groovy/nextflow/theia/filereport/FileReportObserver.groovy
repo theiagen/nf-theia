@@ -25,6 +25,7 @@ import nextflow.Session
 import nextflow.processor.TaskHandler
 import nextflow.processor.TaskRun
 import nextflow.script.params.FileOutParam
+import nextflow.script.params.TupleOutParam
 import nextflow.trace.TraceObserver
 import nextflow.trace.TraceRecord
 import nextflow.theia.filereport.CloudFileUtils
@@ -103,11 +104,30 @@ class FileReportObserver implements TraceObserver {
         final tag = trace.get('tag') as String
         final jsonFileName = tag ? "${processName}_${tag}.json" : "${processName}.json"
 
-        // Get output file paths for checking publication status
-        final outputParams = task.getOutputsByType(FileOutParam)
-        final workDirOutputFiles = outputParams.values().flatten().collect { file ->
-            file instanceof Path ? file : Paths.get(file.toString())
+        // Get output file paths for checking publication status from the JSON content
+        final Map outputsMap = (Map)jsonContent.outputs
+        final List<Path> workDirOutputFiles = []
+        
+        // Extract all work directory files from all emit groups and log emit names
+        log.debug "=== EMIT NAMES EXTRACTION DEBUG ==="
+        log.debug "Task: ${task.name}"
+        log.debug "Process: ${processName}"
+        log.debug "Tag: ${tag}"
+        log.debug "Total emit groups: ${outputsMap.size()}"
+        
+        outputsMap.each { emitName, emitData ->
+            final Map emitMap = (Map)emitData
+            final List<String> workDirPaths = emitMap.workDirFiles as List<String>
+            
+            log.debug "Emit group '${emitName}':"
+            log.debug "  - Work directory files: ${workDirPaths}"
+            log.debug "  - File count: ${workDirPaths.size()}"
+            
+            workDirPaths.each { pathStr ->
+                workDirOutputFiles << Paths.get(pathStr)
+            }
         }
+        log.debug "=== END EMIT NAMES DEBUG ==="
 
         boolean hasPublishedPaths = workDirOutputFiles.any { collector.isFilePublished(it) }
         boolean taskHasPublishDir = hasPublishDir(task)

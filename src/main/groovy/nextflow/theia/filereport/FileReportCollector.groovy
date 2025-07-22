@@ -23,6 +23,7 @@ import groovy.transform.CompileStatic
 import groovy.util.logging.Slf4j
 import nextflow.processor.TaskRun
 import nextflow.script.params.FileOutParam
+import nextflow.script.params.TupleOutParam
 import nextflow.trace.TraceRecord
 
 /**
@@ -99,6 +100,7 @@ class FileReportCollector {
         }
     }
     
+
     /**
      * Create a JSON report for a completed task.
      */
@@ -106,9 +108,19 @@ class FileReportCollector {
         final processName = task.processor.name
         final tag = trace.get('tag') as String
 
-        // Get output file paths grouped by emit names
-        final outputParams = task.getOutputsByType(FileOutParam)
-        final Map<String, List<Path>> outputsByEmit = groupOutputsByEmit(outputParams)
+        // Try to get original output definitions before decomposition
+        log.debug "Attempting to get original output definitions for task ${task.name}"
+        final Map<String, List<Path>> outputsByEmit = tryGetOriginalOutputDefinitionsNew(task)
+        
+        // Fallback to decomposed outputs if original definitions not accessible
+        if (outputsByEmit.isEmpty()) {
+            log.debug "Original output definitions not accessible, falling back to decomposed outputs"
+            final outputParams = task.getOutputsByType(FileOutParam)
+            final tupleOutputParams = task.getOutputsByType(TupleOutParam)
+            outputsByEmit.putAll(groupOutputsByEmit(outputParams, tupleOutputParams, task))
+        } else {
+            log.debug "Successfully retrieved ${outputsByEmit.size()} output groups from original definitions"
+        }
 
         if (outputsByEmit.isEmpty()) {
             log.trace "No output files found for task ${task.name}"
@@ -252,71 +264,88 @@ class FileReportCollector {
     }
     
     /**
-     * Group output files by their emit names.
+     * Build a mapping of output index to emit name from the processor's output definitions.
      */
-    private Map<String, List<Path>> groupOutputsByEmit(Map outputParams) {
+    private Map<Integer, String> getEmitNameMap(TaskRun task) {
+        Map<Integer, String> emitNames = new LinkedHashMap<Integer, String>()
+        try {
+            def processor = task?.processor
+            def outputs = processor?.config?.getOutputs()
+            outputs?.eachWithIndex { output, idx ->
+                def emitName = null
+                try { emitName = output?.channelEmitName } catch (ignored) {}
+                if (!emitName) {
+                    def metaProp = output?.metaClass?.hasProperty(output, 'emit')
+                    if (metaProp) {
+                        emitName = output.metaClass.getProperty(output, 'emit')
+                    }
+                }
+                emitNames.put((Integer)idx, (String)(emitName ? emitName.toString() : "output_${idx}"))
+            }
+        } catch (Exception e) {
+            log.warn "Failed to build emit name map: ${e.message}", e
+        }
+        return emitNames
+    }
+
+    /**
+     * Group output files by their emit names using the emit name map.
+     */
+    private Map<String, List<Path>> groupOutputsByEmit(Map outputParams, Map tupleOutputParams, TaskRun task) {
         final Map<String, List<Path>> outputsByEmit = [:]
-        int outputIndex = 0
         
+        log.debug "groupOutputsByEmit called with:"
+        log.debug "  outputParams.size(): ${outputParams.size()}"
+        log.debug "  tupleOutputParams.size(): ${tupleOutputParams.size()}"
         outputParams.each { param, files ->
-            String emitName = extractEmitName(param, outputIndex)
+            log.debug "  FileOutParam: ${param?.getClass()?.name} - ${param?.toString()}"
+        }
+        tupleOutputParams.each { param, files ->
+            log.debug "  TupleOutParam: ${param?.getClass()?.name} - ${param?.toString()}"
+        }
+        
+        // Use the emit name map for all outputs
+        Map<Integer, String> emitNamesByIndex = getEmitNameMap(task)
+        log.debug "Emit name map: ${emitNamesByIndex}"
+        
+        int outputIndex = 0
+        outputParams.each { param, files ->
+            String emitName = emitNamesByIndex[outputIndex]
             final fileList = files instanceof List ? files : [files]
             final List<Path> pathList = fileList.collect { file ->
                 file instanceof Path ? file : Paths.get(file.toString())
             }
             outputsByEmit[emitName] = pathList
+            log.debug "Mapped FileOutParam at index ${outputIndex} to emit name '${emitName}' with ${pathList.size()} files"
+            outputIndex++
+        }
+        
+        tupleOutputParams.each { param, files ->
+            String emitName = emitNamesByIndex[outputIndex]
+            final fileList = files instanceof List ? files : [files]
+            final List<Path> pathList = []
+            fileList.each { file ->
+                if (file instanceof Path) {
+                    pathList << file
+                } else {
+                    try {
+                        final pathCandidate = Paths.get(file.toString())
+                        if (file.toString().contains('.') || file.toString().contains('/')) {
+                            pathList << pathCandidate
+                        }
+                    } catch (Exception e) {
+                        log.debug "Skipping non-path element from TupleOutParam: ${file} (${e.message})"
+                    }
+                }
+            }
+            if (!pathList.isEmpty()) {
+                outputsByEmit[emitName] = pathList
+                log.debug "Mapped TupleOutParam at index ${outputIndex} to emit name '${emitName}' with ${pathList.size()} files"
+            }
             outputIndex++
         }
         
         return outputsByEmit
-    }
-    
-    /**
-     * Extract emit name from FileOutParam object.
-     */
-    private String extractEmitName(Object param, int index) {
-        // Try to get the emit name from the parameter
-        try {
-            log.debug "Extracting emit name from param: ${param?.getClass()?.name} - ${param?.toString()}"
-            
-            // Try to extract from string representation first (most reliable)
-            String paramStr = param?.toString()
-            if (paramStr && paramStr.contains('emit:')) {
-                // Extract emit name from string like "path 'file.txt', emit: result"
-                def matcher = paramStr =~ /emit:\s*(\w+)/
-                if (matcher.find()) {
-                    String emitName = matcher.group(1)
-                    log.debug "Found emit name from string: ${emitName}"
-                    return emitName
-                }
-            }
-            
-            // Use reflection to safely access properties
-            def metaClass = param.getClass().metaClass
-            
-            // Check common property names for emit
-            def propertyNames = ['channelEmitName', 'emit', 'name']
-            for (String propName : propertyNames) {
-                try {
-                    def property = metaClass.getProperty(param, propName)
-                    if (property && property.toString().trim()) {
-                        String emitName = property.toString().trim()
-                        log.debug "Found emit name from property ${propName}: ${emitName}"
-                        return emitName
-                    }
-                } catch (Exception ignored) {
-                    // Property doesn't exist or can't be accessed
-                }
-            }
-            
-        } catch (Exception e) {
-            log.debug "Failed to extract emit name from param: ${e.message}"
-        }
-        
-        // Fallback to indexed output name
-        String fallback = "output_${index}"
-        log.debug "Using fallback emit name: ${fallback}"
-        return fallback
     }
     
     /**
@@ -345,19 +374,88 @@ class FileReportCollector {
     }
     
     /**
-     * Populate file paths in the JSON content (legacy method for backward compatibility).
+     * Try to get original output definitions from TaskProcessor before decomposition.
      */
-    private void populateFilePaths(Map jsonContent, List<Path> workDirOutputFiles) {
-        synchronized(publishedPathMap) {
-            for (Path workFile : workDirOutputFiles) {
-                final workFileStr = workFile.toString()
-                ((List<String>)((Map)jsonContent.outputs).workDirFiles).add(workFileStr)
-                if (publishedPathMap.containsKey(workFileStr)) {
-                    ((List<String>)((Map)jsonContent.outputs).publishedFiles).addAll(
-                        publishedPathMap[workFileStr]
-                    )
+    private Map<String, List<Path>> tryGetOriginalOutputDefinitionsNew(TaskRun task) {
+        final Map<String, List<Path>> outputsByEmit = [:]
+        
+        try {
+            log.debug "Attempting to access original output definitions via TaskProcessor"
+            
+            // Build emit name mapping from processor's original configuration
+            Map<Integer, String> emitNamesByIndex = getEmitNameMap(task)
+            
+            if (!emitNamesByIndex.isEmpty()) {
+                log.debug "Built emit name mapping: ${emitNamesByIndex}"
+                return mapDecomposedOutputsByEmitNames(task, emitNamesByIndex)
+            } else {
+                log.debug "Could not build emit name mapping"
+            }
+            
+        } catch (Exception e) {
+            log.debug "Failed to access original output definitions: ${e.message}"
+        }
+        
+        return outputsByEmit
+    }
+    
+
+    
+    
+    /**
+     * Map decomposed outputs to emit names using the built mapping.
+     */
+    private Map<String, List<Path>> mapDecomposedOutputsByEmitNames(TaskRun task, Map<Integer, String> emitNamesByIndex) {
+        final Map<String, List<Path>> outputsByEmit = [:]
+        
+        try {
+            // Get all decomposed outputs
+            final decomposedFileOuts = task.getOutputsByType(FileOutParam)
+            
+            // Group decomposed outputs by their original index (extracted from <x:y> pattern)
+            Map<Integer, List<Path>> filesByOriginalIndex = [:]
+            
+            decomposedFileOuts.each { param, files ->
+                String paramStr = param.toString()
+                log.debug "Processing decomposed FileOutParam: ${paramStr}"
+                
+                // Extract original index from parameter string pattern like <0:0>, <1:1>, <2:1>
+                def matcher = paramStr =~ /<(\d+):(\d+)>/
+                if (matcher.find()) {
+                    int originalIndex = Integer.parseInt(matcher.group(1))
+                    
+                    if (!filesByOriginalIndex.containsKey(originalIndex)) {
+                        filesByOriginalIndex[originalIndex] = []
+                    }
+                    
+                    // Add files from this decomposed param to the original index group
+                    def fileList = files instanceof List ? files : [files]
+                    fileList.each { file ->
+                        if (file instanceof Path) {
+                            filesByOriginalIndex[originalIndex].add(file)
+                        } else if (file.toString().contains('.') || file.toString().contains('/')) {
+                            // Only include file-like strings (not val elements)
+                            filesByOriginalIndex[originalIndex].add(Paths.get(file.toString()))
+                        }
+                    }
                 }
             }
+            
+            log.debug "Files grouped by original index: ${filesByOriginalIndex.collectEntries { k, v -> [k, v.size()] }}"
+            
+            // Map files to emit names using the index mapping
+            filesByOriginalIndex.each { originalIndex, files ->
+                String emitName = emitNamesByIndex[originalIndex] ?: "output_${originalIndex}".toString()
+                if (!files.isEmpty()) {
+                    outputsByEmit[emitName] = files
+                    log.debug "Mapped ${files.size()} files to emit name '${emitName}' for index ${originalIndex}"
+                }
+            }
+            
+        } catch (Exception e) {
+            log.debug "Failed to map decomposed outputs by emit names: ${e.message}"
         }
+        
+        return outputsByEmit
     }
 }

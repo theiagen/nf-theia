@@ -38,6 +38,10 @@ class TheiaObserverFactory implements TraceObserverFactory {
         final config = session.config
         final result = new ArrayList<TraceObserver>()
 
+        // Print plugin version
+        final pluginVersion = getPluginVersion()
+        log.info "nf-theia plugin version: ${pluginVersion}"
+
         // Check if file report is enabled
         if (FileReportConfig.isEnabled(config)) {
             log.info "Creating FileReportObserver"
@@ -45,5 +49,39 @@ class TheiaObserverFactory implements TraceObserverFactory {
         }
 
         return result
+    }
+
+    /**
+     * Get the plugin version from the MANIFEST.MF file
+     */
+    private String getPluginVersion() {
+        try {
+            // Try to read from plugin-specific MANIFEST.MF
+            final urls = this.class.classLoader.getResources("META-INF/MANIFEST.MF")
+            while (urls.hasMoreElements()) {
+                final manifestUrl = urls.nextElement()
+                try {
+                    final manifest = new java.util.jar.Manifest(manifestUrl.openStream())
+                    final attributes = manifest.mainAttributes
+                    final pluginId = attributes.getValue("Plugin-Id")
+                    if (pluginId == "nf-theia") {
+                        final version = attributes.getValue("Plugin-Version")
+                        if (version) {
+                            return version
+                        }
+                    }
+                } catch (Exception ignored) {
+                    // Continue to next MANIFEST.MF
+                }
+            }
+            
+            // Fallback to package information
+            final packageInfo = this.class.package
+            final version = packageInfo?.implementationVersion ?: packageInfo?.specificationVersion
+            return version ?: "unknown"
+        } catch (Exception e) {
+            log.debug "Failed to read plugin version: ${e.message}"
+            return "unknown"
+        }
     }
 }

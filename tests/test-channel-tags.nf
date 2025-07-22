@@ -31,10 +31,15 @@ process QC_CHECK {
     
     output:
     path "${sample_id}_qc_passed.txt", emit: qc_result
-    tuple val(sample_id), path("${sample_id}_qc_metrics.json"), emit: metrics
+    tuple val(sample_id), path("${sample_id}_qc_metrics.json"), emit: metrics_and_status
+    tuple val(sample_id), path("${sample_id}_qc_summary.txt"), emit: summaryA10
+    tuple val(sample_id), path("${sample_id}_qc_validation.txt"), emit: validationA1
+    tuple val(sample_id), path("${sample_id}_qc_{validation,summary}.txt"), emit: comb1XX
 
     script:
     """
+    echo "Summary of QC check on ${sample_id}" > ${sample_id}_qc_summary.txt
+    echo "Validatinf on ${sample_id}" > ${sample_id}_qc_validation.txt
     echo "QC check passed for ${sample_id}" > ${sample_id}_qc_passed.txt
     echo '{"sample": "${sample_id}", "qc_score": 95, "status": "PASS"}' > ${sample_id}_qc_metrics.json
     """

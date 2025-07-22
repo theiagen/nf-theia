@@ -1,6 +1,6 @@
 Manifest-Version: 1.0
 Plugin-Id: nf-theia
 Plugin-Class: nextflow.theia.TheiaPlugin
-Plugin-Version: 0.2.2
+Plugin-Version: 0.2.3
 Plugin-Provider: theiagen
 Plugin-Requires: >=24.10.0

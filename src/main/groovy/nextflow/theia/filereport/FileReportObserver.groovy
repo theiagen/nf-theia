@@ -19,6 +19,7 @@ package nextflow.theia.filereport
 import java.nio.file.Path
 import java.nio.file.Paths
 
+import groovy.json.JsonOutput
 import groovy.transform.CompileStatic
 import groovy.util.logging.Slf4j
 import nextflow.Session
@@ -231,10 +232,19 @@ class FileReportObserver implements TraceObserver {
         // Write to each base publishDir
         basePublishDirs.each { publishPathStr ->
             try {
-                final Path publishPathObj = Paths.get(publishPathStr)
-                final collatedFile = publishPathObj.resolve(config.collatedFileName)
-                JsonFileWriter.writeToFile(collatedFile, collatedData)
-                log.info "Written collated report to: ${collatedFile}"
+                if (CloudFileUtils.isStrippedLatchPath(publishPathStr) || publishPathStr.startsWith('latch://')) {
+                    // Handle latch paths specially - construct the full latch URL
+                    final latchUrl = CloudFileUtils.reconstructLatchUrl(publishPathStr)
+                    final latchFilePath = latchUrl + "/" + config.collatedFileName
+                    LatchFileWriter.writeToLatch(latchFilePath, JsonOutput.prettyPrint(JsonOutput.toJson(collatedData)))
+                    log.info "Written collated report to Latch: ${latchFilePath}"
+                } else {
+                    // Handle regular paths (local, S3, etc.)
+                    final Path publishPathObj = Paths.get(publishPathStr)
+                    final collatedFile = publishPathObj.resolve(config.collatedFileName)
+                    JsonFileWriter.writeToFile(collatedFile, collatedData)
+                    log.info "Written collated report to: ${collatedFile}"
+                }
             } catch (Exception e) {
                 log.debug "Failed to write collated report to publishDir ${publishPathStr}", e
             }

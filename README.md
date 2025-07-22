@@ -53,7 +53,7 @@ A Nextflow plugin for comprehensive file tracking and reporting, providing detai
 1. **Test repository** (alternative for development):
 
    ```bash
-   export NXF_PLUGINS_TEST_REPOSITORY="https://github.com/theiagen/nf-theia/releases/download/v0.2.2/nf-theia-0.2.2-meta.json"
+   export NXF_PLUGINS_TEST_REPOSITORY="https://github.com/theiagen/nf-theia/releases/download/v0.2.3/nf-theia-0.2.3-meta.json"
    ```
 
 2. **Manual plugin installation**:
@@ -68,13 +68,14 @@ Add the plugin configuration to your `nextflow.config` file:
 
 ```groovy
 plugins {
-    id 'nf-theia@0.2.2'
+    id 'nf-theia@0.2.3'
 }
 
 theia {
     fileReport {
         enabled = true
         collate = true
+        workdir = true
         collatedFileName = "collated-workflow-files.json"
     }
 }
@@ -84,7 +85,8 @@ theia {
 
 - **`enabled`** (boolean): Enable/disable file reporting (default: `false`)
 - **`collate`** (boolean): Generate a single collated report file (default: `false`)
-- **`collatedFileName`** (string): Name of the collated report file (default: `"colalted-workflow-files.json"`)
+- **`workdir`** (boolean): Write json files to workdir (default: `false`)
+- **`collatedFileName`** (string): Name of the collated report file (default: `"collated-workflow-files.json"`)
 
 **Note**: Ensure your environment has proper authentication configured for your chosen cloud storage provider.
 

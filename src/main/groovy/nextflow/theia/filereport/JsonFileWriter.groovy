@@ -56,14 +56,17 @@ class JsonFileWriter {
                 final publishPath = publisher.path
                 final jsonFile = publishPath.resolve(jsonFileName)
                 
+                // Get the proper cloud path string (handles stripped latch URLs)
+                final publishPathStr = CloudFileUtils.getCloudPathString(publishPath)
+                
                 if (CloudFileUtils.isS3Path(publishPath)) {
                     // Handle S3 paths
-                    final s3JsonPath = publishPath.toString() + "/" + jsonFileName
+                    final s3JsonPath = publishPathStr + "/" + jsonFileName
                     S3FileWriter.writeToS3(s3JsonPath, jsonText)
                     log.debug "Written file report to S3: ${s3JsonPath}"
-                } else if (CloudFileUtils.isLatchPath(publishPath)) {
-                    // Handle Latch paths
-                    final latchJsonPath = publishPath.toString() + "/" + jsonFileName
+                } else if (CloudFileUtils.isLatchPath(publishPath) || CloudFileUtils.isStrippedLatchPath(publishPathStr)) {
+                    // Handle Latch paths (including reconstructed ones)
+                    final latchJsonPath = CloudFileUtils.reconstructLatchUrl(publishPathStr) + "/" + jsonFileName
                     LatchFileWriter.writeToLatch(latchJsonPath, jsonText)
                     log.debug "Written file report to Latch: ${latchJsonPath}"
                 } else {
@@ -73,7 +76,7 @@ class JsonFileWriter {
                     log.debug "Written file report to: ${jsonFile}"
                 }
             } catch (Exception e) {
-                log.debug "Failed to write file report to ${publisher.path}/${jsonFileName}", e
+                log.debug "Failed to write file report to ${CloudFileUtils.getCloudPathString(publisher.path)}/${jsonFileName}", e
             }
         }
     }
@@ -85,14 +88,18 @@ class JsonFileWriter {
         try {
             final jsonText = JsonOutput.prettyPrint(JsonOutput.toJson(jsonContent))
             
+            // Get the proper cloud path string (handles stripped latch URLs)
+            final filePathStr = CloudFileUtils.getCloudPathString(filePath)
+            
             if (CloudFileUtils.isS3Path(filePath)) {
                 // Handle S3 paths
-                S3FileWriter.writeToS3(filePath.toString(), jsonText)
-                log.debug "Written file report to S3: ${filePath}"
-            } else if (CloudFileUtils.isLatchPath(filePath)) {
-                // Handle Latch paths
-                LatchFileWriter.writeToLatch(filePath.toString(), jsonText)
-                log.debug "Written file report to Latch: ${filePath}"
+                S3FileWriter.writeToS3(filePathStr, jsonText)
+                log.debug "Written file report to S3: ${filePathStr}"
+            } else if (CloudFileUtils.isLatchPath(filePath) || CloudFileUtils.isStrippedLatchPath(filePathStr)) {
+                // Handle Latch paths (including reconstructed ones)
+                final latchUrl = CloudFileUtils.reconstructLatchUrl(filePathStr)
+                LatchFileWriter.writeToLatch(latchUrl, jsonText)
+                log.debug "Written file report to Latch: ${latchUrl}"
             } else {
                 // Handle local filesystem paths
                 Files.createDirectories(filePath.parent)
@@ -100,7 +107,7 @@ class JsonFileWriter {
                 log.debug "Written file report to: ${filePath}"
             }
         } catch (Exception e) {
-            log.warn "Failed to write file report to ${filePath}", e
+            log.warn "Failed to write file report to ${CloudFileUtils.getCloudPathString(filePath)}", e
         }
     }
     

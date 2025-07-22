@@ -99,7 +99,7 @@ task makeZip(type: Jar) {
           {
             "version": "${project.version}",
             "date": "${timestamp}",
-            "url": "https://github.com/${github_organization}/${project.name}/releases/download/${project.version}/${project.name}-${project.version}.zip",
+            "url": "https://github.com/${github_organization}/${project.name}/releases/download/v${project.version}/${project.name}-${project.version}.zip",
             "requires": "${metaFromManifest('Plugin-Requires',file('src/main/resources/META-INF/MANIFEST.MF'))}",
             "sha512sum": "${computeSha512(zip)}"
           }

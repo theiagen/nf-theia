@@ -53,7 +53,7 @@ A Nextflow plugin for comprehensive file tracking and reporting, providing detai
 1. **Test repository** (alternative for development):
 
    ```bash
-   export NXF_PLUGINS_TEST_REPOSITORY="https://github.com/theiagen/nf-theia/releases/download/v0.2.1/nf-theia-0.2.1-meta.json"
+   export NXF_PLUGINS_TEST_REPOSITORY="https://github.com/theiagen/nf-theia/releases/download/v0.2.2/nf-theia-0.2.2-meta.json"
    ```
 
 2. **Manual plugin installation**:
@@ -68,7 +68,7 @@ Add the plugin configuration to your `nextflow.config` file:
 
 ```groovy
 plugins {
-    id 'nf-theia@0.2.1'
+    id 'nf-theia@0.2.2'
 }
 
 theia {

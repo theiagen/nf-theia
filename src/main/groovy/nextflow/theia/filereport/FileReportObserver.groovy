@@ -53,7 +53,8 @@ class FileReportObserver implements TraceObserver {
         this.session = session
         this.config = FileReportConfig.fromSession(session)
         this.collector = new FileReportCollector()
-        log.info "FileReportObserver initialized - file reporting enabled (collate: ${config.collate})"
+        collector.setSession(session)
+        log.info "FileReportObserver initialized - file reporting enabled (collate: ${config.collate}, workdir: ${config.workdir})"
     }
 
     /**
@@ -140,6 +141,13 @@ class FileReportObserver implements TraceObserver {
         log.debug "Writing individual JSON file for ${task.name}: ${jsonFileName}"
         JsonFileWriter.writeToPublishDirs(task, jsonFileName, jsonContent)
         
+        // Also write to workDir if enabled
+        if (config.workdir) {
+            final workDir = session.workDir
+            log.debug "Writing individual JSON file to workDir for ${task.name}: ${jsonFileName}"
+            JsonFileWriter.writeToWorkDir(workDir, jsonFileName, jsonContent)
+        }
+        
         // Record this individual JSON file for later update with published files
         collector.recordIndividualJsonFile(task, jsonFileName)
     }
@@ -179,8 +187,17 @@ class FileReportObserver implements TraceObserver {
         try {
             final collatedData = collector.createCollatedReport()
             
-            // Write to publishDir locations only
+            // Write to publishDir locations
             writeCollatedToPublishDirs(collatedData)
+            
+            // Also write to workDir if enabled
+            if (config.workdir) {
+                final workDir = session.workDir
+                final reportDir = workDir.resolve("reportfile")
+                final collatedFile = reportDir.resolve(config.collatedFileName)
+                log.debug "Writing collated report to workDir: ${collatedFile}"
+                JsonFileWriter.writeToFile(collatedFile, collatedData)
+            }
             
             final taskCount = ((List)collatedData.tasks).size()
             log.info "Collated file report written with ${taskCount} tasks"

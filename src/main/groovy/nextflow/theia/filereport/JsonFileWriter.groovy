@@ -103,4 +103,21 @@ class JsonFileWriter {
             log.warn "Failed to write file report to ${filePath}", e
         }
     }
+    
+    /**
+     * Write JSON content to workDir/reportfile directory.
+     */
+    static void writeToWorkDir(Path workDir, String jsonFileName, Map jsonContent) {
+        try {
+            final reportDir = workDir.resolve("reportfile")
+            final jsonFile = reportDir.resolve(jsonFileName)
+            final jsonText = JsonOutput.prettyPrint(JsonOutput.toJson(jsonContent))
+            
+            Files.createDirectories(reportDir)
+            Files.write(jsonFile, jsonText.getBytes('UTF-8'))
+            log.debug "Written file report to workDir: ${jsonFile}"
+        } catch (Exception e) {
+            log.warn "Failed to write file report to workDir ${workDir}/reportfile/${jsonFileName}", e
+        }
+    }
 }

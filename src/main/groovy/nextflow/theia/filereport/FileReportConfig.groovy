@@ -29,6 +29,7 @@ class FileReportConfig {
     
     boolean enabled = false
     boolean collate = false
+    boolean workdir = false
     String collatedFileName = "workflow_files.json"
     
     static FileReportConfig fromSession(Session session) {
@@ -40,6 +41,7 @@ class FileReportConfig {
         } else if (fileReportConfig instanceof Map) {
             config.enabled = true
             config.collate = fileReportConfig.collate ?: false
+            config.workdir = fileReportConfig.workdir ?: false
             config.collatedFileName = fileReportConfig.collatedFileName ?: "workflow_files.json"
         }
         

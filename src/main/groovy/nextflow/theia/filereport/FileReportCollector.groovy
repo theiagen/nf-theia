@@ -21,6 +21,7 @@ import java.nio.file.Paths
 
 import groovy.transform.CompileStatic
 import groovy.util.logging.Slf4j
+import nextflow.Session
 import nextflow.processor.TaskRun
 import nextflow.script.params.FileOutParam
 import nextflow.script.params.TupleOutParam
@@ -47,6 +48,16 @@ class FileReportCollector {
     
     // Track individual JSON files that need to be updated with published files
     private final Map<TaskRun, String> taskJsonFiles = [:].asSynchronized()
+    
+    // Track session for workDir access
+    private Session session
+    
+    /**
+     * Set the session for workDir access.
+     */
+    void setSession(Session session) {
+        this.session = session
+    }
     
     /**
      * Record a file publishing event.
@@ -235,6 +246,12 @@ class FileReportCollector {
                         // Rewrite the individual JSON file with updated data
                         log.debug "FileReportCollector: Rewriting individual JSON file for ${task.name}: ${jsonFileName}"
                         JsonFileWriter.writeToPublishDirs(task, jsonFileName, taskReport)
+                        
+                        // Also update workDir file if workdir config is enabled
+                        if (session && session.config.navigate('theia.fileReport.workdir')) {
+                            log.debug "FileReportCollector: Rewriting individual JSON file to workDir for ${task.name}: ${jsonFileName}"
+                            JsonFileWriter.writeToWorkDir(session.workDir, jsonFileName, taskReport)
+                        }
                     } else {
                         log.warn "FileReportCollector: Could not find task report for ${task.name}"
                     }
